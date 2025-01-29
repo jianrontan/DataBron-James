@@ -3,10 +3,11 @@ import numpy as np
 import pandas as pd
 import re
 import spacy
+import nltk
 from nltk.stem import PorterStemmer
 from nltk.corpus import stopwords
 from nltk.tokenize import sent_tokenize, word_tokenize
-from spacy.pipeline.ner import DEFAULT_NER_MODEL
+# from spacy.pipeline.ner import DEFAULT_NER_MODEL
 
 
 class TextPreprocessor:
@@ -21,12 +22,12 @@ class TextPreprocessor:
         self.nlp = spacy.load("en_core_web_sm")
 
         # NER configuration
-        self.ner_config = {
-            "moves": None,
-            "update_with_oracle_cut_size": 100,
-            "model": DEFAULT_NER_MODEL,
-            "incorrect_spans_key": "incorrect_spans",
-        }
+        # self.ner_config = {
+        #     "moves": None,
+        #     "update_with_oracle_cut_size": 100,
+        #     "model": DEFAULT_NER_MODEL,
+        #     "incorrect_spans_key": "incorrect_spans",
+        # }
 
     def load_and_clean_text(self, file_path):
         """Load and clean text from Excel file"""
@@ -75,8 +76,13 @@ class TextPreprocessor:
 
     def tokenize_text(self, data):
         """Tokenize cleaned text"""
-        data['Tokenized'] = data['Cleaned_words'].apply(word_tokenize)
-        return data
+        try:
+            data['Tokenized'] = data['Cleaned_words'].apply(
+                lambda x: x.split())
+            return data
+        except Exception as e:
+            print(f"Error in tokenization: {str(e)}")
+            return None
 
     def apply_ner(self, tokens):
         """Apply Named Entity Recognition"""
