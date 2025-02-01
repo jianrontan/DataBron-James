@@ -41,11 +41,20 @@ class KnowledgeBase:
     def add_entity(self, text: str, entity_type: str, uri: str, confidence: float, article_url: str):
         """Add entity with metadata"""
         node_id = uri if uri else f"{entity_type}_{text}"
-
-        # Determine if it's an entity or attribute
         category = 'entities' if entity_type in self.entities else 'attributes'
-
-        if node_id not in self.graph:
+        
+        # Initialize dictionary entry if it doesn't exist
+        target_dict = self.entities if category == 'entities' else self.attributes
+        if entity_type not in target_dict:
+            target_dict[entity_type] = {}
+        if text not in target_dict[entity_type]:
+            target_dict[entity_type][text] = {
+                'uri': uri,
+                'mentions': [article_url],
+                'confidence': confidence,
+                'confidence_counts': 1
+            }
+            # Add node to graph
             self.graph.add_node(
                 node_id,
                 type=entity_type,
@@ -54,19 +63,17 @@ class KnowledgeBase:
                 articles={article_url: confidence},
                 mentions=1
             )
-
-            # Add to appropriate dictionary
-            if category == 'entities':
-                self.entities[entity_type][text] = {
-                    'uri': uri,
-                    'mentions': [article_url],
-                    'confidence': confidence
-                }
-            else:
-                self.attributes[entity_type][text] = {
-                    'mentions': [article_url],
-                    'value': text
-                }
+        else:
+            # Update existing entry
+            current_item = target_dict[entity_type][text]
+            count = current_item.get('confidence_counts', 1)
+            current_conf = current_item.get('confidence', confidence)
+            new_conf = (current_conf * count + confidence) / (count + 1)
+            
+            # Update values
+            current_item['confidence'] = new_conf
+            current_item['confidence_counts'] = count + 1
+            current_item['mentions'].append(article_url)
 
     def add_relationship(self, subject: str, predicate: str, object: str,
                          confidence: float = 0.5, article_url: str = None):

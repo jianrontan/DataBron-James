@@ -1,6 +1,7 @@
 from rdflib import Graph, Namespace, Literal, URIRef
 from rdflib.namespace import RDF, RDFS, OWL
 from typing import Dict, List, Tuple
+from difflib import SequenceMatcher
 import requests
 import time
 
@@ -140,8 +141,8 @@ class EntityLinker:
         return relationships
 
     def _calculate_relationship_confidence(self, subject, predicate, obj) -> float:
-        """Calculate confidence score for relationship using dependency information"""
-        base_score = 0.5
+        """Calculate confidence score for relationship using multiple factors"""
+        base_score = 0.3
 
         dep_bonus = 0.0
         if subject.dep_ in ["nsubj", "nsubjpass"]:
@@ -149,12 +150,19 @@ class EntityLinker:
         if obj.dep_ in ["dobj", "pobj"]:
             dep_bonus += 0.2
 
-        distance_penalty = 0.05 * (
-            abs(predicate.i - subject.i) + abs(predicate.i - obj.i))
+        distance = abs(predicate.i - subject.i) + abs(predicate.i - obj.i)
+        distance_penalty = min(0.3, 0.05 * distance)
 
-        confidence = max(0.1, min(1.0, base_score +
-                         dep_bonus - distance_penalty))
-        return confidence
+        pattern_bonus = 0.1 if predicate.lemma_ in [
+            "be", "have", "own", "create", "lead"
+        ] else 0.0
+
+        confidence = base_score + dep_bonus + pattern_bonus - distance_penalty
+        return max(0.1, min(1.0, confidence))
+
+    def _calculate_string_similarity(self, s1: str, s2: str) -> float:
+        """Calculate string similarity using Levenshtein distance"""
+        return SequenceMatcher(None, s1.lower(), s2.lower()).ratio()
 
     def _process_entity_candidate(self, entity_text: str, entity_type: str, candidate: Dict) -> Dict:
         """
@@ -169,22 +177,20 @@ class EntityLinker:
             Dict: Processed entity data with URI and confidence score
         """
         try:
-            # Extract Wikidata URI
             entity_uri = candidate['item']['value']
-
-            # Get confidence score from Wikidata match
-            confidence = float(candidate.get('score', {}).get('value', 0.5))
-
-            # Create entity data structure
-            entity_data = {
+            if 'score' in candidate:
+                confidence = float(candidate['score']['value'])
+            else:
+                confidence = self._calculate_string_similarity(
+                    entity_text,
+                    candidate.get('itemLabel', {}).get('value', '')
+                )
+            return {
                 'text': entity_text,
                 'type': entity_type,
                 'wikidata_uri': entity_uri,
                 'confidence': confidence
             }
-
-            return entity_data
-
         except Exception as e:
             print(f"Error processing entity candidate: {e}")
             # Return default entity data if processing fails
@@ -195,7 +201,7 @@ class EntityLinker:
                 'confidence': 0.1
             }
 
-    def _extract_and_link_entities_from_preprocessed(self, text: str, tokenized: list, ner: list, article_url: str):
+    def _extract_and_link_entities_from_preprocessed(self, text: str, tokenized: list, ner: list, article_url: str, confidence_threshold: float = 0.5):
         """Extract and link entities from preprocessed data"""
         linked_entities = []
         total_entities = len(ner)
@@ -210,18 +216,17 @@ class EntityLinker:
             candidates = entity_results.get(entity_text, [])
             if candidates:
                 entity_data = self._process_entity_candidate(
-                    entity_text,
-                    entity_type,
+                    entity_text,                     entity_type,
                     candidates[0]
                 )
-                linked_entities.append(entity_data)
+                if entity_data['confidence'] >= confidence_threshold:
+                    linked_entities.append(entity_data)
 
         return linked_entities
 
-    def _extract_relationships_from_tokenized(self, doc):
+    def _extract_relationships_from_tokenized(self, doc, confidence_threshold=0.4):
         """Extract relationships using preprocessed dependencies"""
         relationships = []
-
         dep_map = {token: {'lefts': list(token.lefts), 'rights': list(token.rights)}
                    for token in doc}
 
@@ -236,45 +241,54 @@ class EntityLinker:
                     if subject and obj:
                         confidence = self._calculate_relationship_confidence(
                             subject, token, obj)
-                        rel_data = {
-                            'subject': subject.text,
-                            'predicate': token.text,
-                            'object': obj.text,
-                            'confidence': confidence
-                        }
-                        relationships.append(rel_data)
+
+                        if confidence >= confidence_threshold:
+                            rel_data = {
+                                'subject': subject.text,
+                                'predicate': token.text,
+                                'object': obj.text,
+                                'confidence': confidence
+                            }
+                            relationships.append(rel_data)
 
         return relationships
 
-    def process_batch(self, articles: List[Dict]):
-        """Process articles in batches with proper progress tracking"""
+    def process_batch(self, articles: List[Dict], entity_confidence_threshold: float = 0.5,
+                      relationship_confidence_threshold: float = 0.4):
+        """Process articles with confidence filtering"""
         results = []
         total = len(articles)
-        print(f"\nProcessing {
-              total} articles for entities and relationships...")
 
         for i, article in enumerate(articles):
             entities = self._extract_and_link_entities_from_preprocessed(
                 text=article['text'],
                 tokenized=article['tokenized'],
                 ner=article['ner'],
-                article_url=article['url']
+                article_url=article['url'],
+                confidence_threshold=entity_confidence_threshold
             )
 
-            relationships = self._extract_relationships_from_tokenized(
-                article['doc']
-            )
+            relationships = []
+            if entities:
+                relationships = self._extract_relationships_from_tokenized(
+                    article['doc'],
+                    confidence_threshold=relationship_confidence_threshold
+                )
 
             article_result = {
                 'article_url': article['url'],
                 'entities': entities,
-                'relationships': relationships
+                'relationships': relationships,
+                'metadata': {
+                    'total_entities_before_filter': len(article['ner']),
+                    'entities_after_filter': len(entities),
+                    'relationships_after_filter': len(relationships)
+                }
             }
 
             results.append(article_result)
             self._update_knowledge_base([article_result])
 
-            # Update progress bar
             progress = (i + 1) / total * 100
             bar_length = 30
             filled_length = int(bar_length * progress // 100)
