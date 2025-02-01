@@ -33,19 +33,6 @@ class EntityLinker:
                 return child
         return None
 
-    def link_entities(self, text: str, article_url: str) -> Dict:
-        doc = self.nlp(text)
-
-        entities = self._extract_and_link_entities(doc, article_url)
-
-        relationships = self._extract_relationships(doc)
-
-        return {
-            'article_url': article_url,
-            'entities': entities,
-            'relationships': relationships
-        }
-
     def _query_wikidata(self, entity_text: str) -> List[Dict]:
         """Query Wikidata for entity candidates"""
         query = f"""
@@ -74,38 +61,6 @@ class EntityLinker:
             print(f"Wikidata query error: {e}")
             return []
 
-    def _extract_and_link_entities(self, doc, article_url: str) -> List[Dict]:
-        """Extract entities and link to Wikidata with confidence scores"""
-        linked_entities = []
-        total_entities = len(doc.ents)
-
-        if total_entities > 0:
-            print(f"\n  Found {total_entities} entities in article: {
-                  article_url[:50]}...")
-
-        for ent in doc.ents:
-            candidates = self._query_wikidata(ent.text)
-            if candidates:
-                best_match = candidates[0]
-                entity_uri = best_match['item']['value']
-                confidence = float(best_match.get(
-                    'score', {}).get('value', 0.5))
-                entity_data = {
-                    'text': ent.text,
-                    'type': ent.label_,
-                    'wikidata_uri': entity_uri,
-                    'confidence': confidence
-                }
-                self.kb.add_entity(
-                    text=ent.text,
-                    entity_type=ent.label_,
-                    uri=entity_uri,
-                    confidence=confidence,
-                    article_url=article_url
-                )
-                linked_entities.append(entity_data)
-        return linked_entities
-
     def _extract_relationships(self, doc) -> List[Dict]:
         """Extract weighted relationships between entities"""
         relationships = []
@@ -131,18 +86,66 @@ class EntityLinker:
 
         return relationships
 
-    def _calculate_relationship_confidence(
-            self, subject, predicate, obj) -> float:
-        """Calculate confidence score for relationship"""
+    def _calculate_relationship_confidence(self, subject, predicate, obj) -> float:
+        """Calculate confidence score for relationship using dependency information"""
         base_score = 0.5
-        distance_penalty = 0.1 * (
+
+        dep_bonus = 0.0
+        if subject.dep_ in ["nsubj", "nsubjpass"]:
+            dep_bonus += 0.2
+        if obj.dep_ in ["dobj", "pobj"]:
+            dep_bonus += 0.2
+
+        distance_penalty = 0.05 * (
             abs(predicate.i - subject.i) + abs(predicate.i - obj.i))
 
-        confidence = max(0.1, min(1.0, base_score - distance_penalty))
+        confidence = max(0.1, min(1.0, base_score +
+                         dep_bonus - distance_penalty))
         return confidence
+
+    def _process_entity_candidate(self, entity_text: str, entity_type: str, candidate: Dict) -> Dict:
+        """
+        Process a Wikidata entity candidate and create entity data structure.
+
+        Args:
+            entity_text (str): Original entity text from the document
+            entity_type (str): NER type of the entity
+            candidate (Dict): Best matching Wikidata candidate
+
+        Returns:
+            Dict: Processed entity data with URI and confidence score
+        """
+        try:
+            # Extract Wikidata URI
+            entity_uri = candidate['item']['value']
+
+            # Get confidence score from Wikidata match
+            confidence = float(candidate.get('score', {}).get('value', 0.5))
+
+            # Create entity data structure
+            entity_data = {
+                'text': entity_text,
+                'type': entity_type,
+                'wikidata_uri': entity_uri,
+                'confidence': confidence
+            }
+
+            return entity_data
+
+        except Exception as e:
+            print(f"Error processing entity candidate: {e}")
+            # Return default entity data if processing fails
+            return {
+                'text': entity_text,
+                'type': entity_type,
+                'wikidata_uri': '',
+                'confidence': 0.1
+            }
 
     def _extract_and_link_entities_from_preprocessed(self, text: str, tokenized: list, ner: list, article_url: str):
         linked_entities = []
+        total_entities = len(ner)
+        print(f"\n  Found {total_entities} entities in article: {article_url[:50]}...")
         for entity_text, entity_type in ner:
             candidates = self._query_wikidata(entity_text)
             if candidates:
