@@ -2,6 +2,7 @@ from rdflib import Graph, Namespace, Literal, URIRef
 from rdflib.namespace import RDF, RDFS, OWL
 from typing import Dict, List, Tuple
 import requests
+import time
 
 
 class EntityLinker:
@@ -18,6 +19,7 @@ class EntityLinker:
         self.kb = knowledge_base
         self.batch_size = batch_size
         self.query_cache = {}
+        self.entity_cache = {}
 
     def _find_subject(self, token):
         """Find the subject connected to the token"""
@@ -60,6 +62,57 @@ class EntityLinker:
         except Exception as e:
             print(f"Wikidata query error: {e}")
             return []
+
+    def _batch_query_wikidata(self, entity_texts: List[str]) -> Dict[str, List[Dict]]:
+        """Query Wikidata for multiple entities at once but maintain individual results"""
+        results = {}
+        new_entities = [
+            text for text in entity_texts if text not in self.entity_cache]
+
+        if not new_entities:
+            return {text: self.entity_cache[text] for text in entity_texts}
+
+        chunk_size = 5
+        for i in range(0, len(new_entities), chunk_size):
+            chunk = new_entities[i:i + chunk_size]
+            values = ' '.join(f'"{text}"' for text in chunk)
+
+            query = f"""
+            SELECT ?search ?item ?itemLabel ?score WHERE {{
+                VALUES ?search {{ {values} }}
+                SERVICE wikibase:mwapi {{
+                    bd:serviceParam wikibase:api "EntitySearch" .
+                    bd:serviceParam wikibase:endpoint "www.wikidata.org" .
+                    bd:serviceParam mwapi:search ?search .
+                    bd:serviceParam mwapi:language "en" .
+                    ?item wikibase:apiOutputItem mwapi:item .
+                    ?score wikibase:apiScore mwapi:score .
+                }}
+                SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" }}
+            }} ORDER BY ?search DESC(?score)
+            """
+
+            try:
+                response = requests.get(
+                    'https://query.wikidata.org/sparql',
+                    params={'query': query, 'format': 'json'},
+                    headers={'User-Agent': 'NLPProject/1.0'}
+                )
+                data = response.json()
+
+                for binding in data['results']['bindings']:
+                    search_term = binding['search']['value']
+                    if search_term not in results:
+                        results[search_term] = []
+                    results[search_term].append(binding)
+                    self.entity_cache[search_term] = results[search_term]
+
+                time.sleep(0.1)
+
+            except Exception as e:
+                print(f"Wikidata batch query error: {e}")
+
+        return {text: self.entity_cache.get(text, []) for text in entity_texts}
 
     def _extract_relationships(self, doc) -> List[Dict]:
         """Extract weighted relationships between entities"""
@@ -143,11 +196,18 @@ class EntityLinker:
             }
 
     def _extract_and_link_entities_from_preprocessed(self, text: str, tokenized: list, ner: list, article_url: str):
+        """Extract and link entities from preprocessed data"""
         linked_entities = []
         total_entities = len(ner)
-        print(f"\n  Found {total_entities} entities in article: {article_url[:50]}...")
+        print(f"\n  Found {total_entities} entities in article: {
+              article_url[:50]}...")
+
+        entity_texts = [entity_text for entity_text, _ in ner]
+
+        entity_results = self._batch_query_wikidata(entity_texts)
+
         for entity_text, entity_type in ner:
-            candidates = self._query_wikidata(entity_text)
+            candidates = entity_results.get(entity_text, [])
             if candidates:
                 entity_data = self._process_entity_candidate(
                     entity_text,
@@ -155,6 +215,7 @@ class EntityLinker:
                     candidates[0]
                 )
                 linked_entities.append(entity_data)
+
         return linked_entities
 
     def _extract_relationships_from_tokenized(self, doc):
@@ -192,36 +253,34 @@ class EntityLinker:
         print(f"\nProcessing {
               total} articles for entities and relationships...")
 
-        for i in range(0, len(articles), self.batch_size):
-            batch = articles[i:i + self.batch_size]
-            batch_results = []
+        for i, article in enumerate(articles):
+            entities = self._extract_and_link_entities_from_preprocessed(
+                text=article['text'],
+                tokenized=article['tokenized'],
+                ner=article['ner'],
+                article_url=article['url']
+            )
 
+            relationships = self._extract_relationships_from_tokenized(
+                article['doc']
+            )
+
+            article_result = {
+                'article_url': article['url'],
+                'entities': entities,
+                'relationships': relationships
+            }
+
+            results.append(article_result)
+            self._update_knowledge_base([article_result])
+
+            # Update progress bar
             progress = (i + 1) / total * 100
             bar_length = 30
             filled_length = int(bar_length * progress // 100)
             bar = '=' * filled_length + '-' * (bar_length - filled_length)
-
             print(f'\rProgress: [{bar}] {
-                  progress:.1f}% - Processing batch {i+1}/{total}', end='')
-
-            for article in batch:
-                entities = self._extract_and_link_entities_from_preprocessed(
-                    text=article['text'],
-                    tokenized=article['tokenized'],
-                    ner=article['ner'],
-                    article_url=article['url']
-                )
-                relationships = self._extract_relationships_from_tokenized(
-                    article['doc']
-                )
-                batch_results.append({
-                    'article_url': article['url'],
-                    'entities': entities,
-                    'relationships': relationships
-                })
-
-            results.extend(batch_results)
-            self._update_knowledge_base(batch_results)
+                  progress:.1f}% - Processing article {i+1}/{total}', end='')
 
         print("\nEntity processing complete!")
         print(f"Total entities found: {
