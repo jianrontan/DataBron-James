@@ -58,7 +58,7 @@ def main():
         preprocessor = TextPreprocessor()
         feature_engineer = TextFeatureEngineer()
         knowledge_base = KnowledgeBase()
-        entity_linker = EntityLinker(knowledge_base)
+        entity_linker = EntityLinker(knowledge_base, batch_size=20)
 
         # Process pipeline
         print("Starting preprocessing...")
@@ -67,23 +67,12 @@ def main():
 
         if news_data is not None:
             print("Processing entities and relationships...")
-            all_entities = []
+            articles = [
+                {'text': row['Text'], 'url': row['Link']}
+                for _, row in news_data.iterrows()
+            ]
 
-            for _, row in news_data.iterrows():
-                # Process entities and relationships
-                article_analysis = entity_linker.link_entities(
-                    text=row['Text'],
-                    article_url=row['Link']
-                )
-                all_entities.append(article_analysis)
-
-                # Add relationships to knowledge base
-                for rel in article_analysis['relationships']:
-                    knowledge_base.add_relationship(
-                        subject=rel['subject'],
-                        predicate=rel['predicate'],
-                        object=rel['object']
-                    )
+            all_entities = entity_linker.process_batch(articles)
 
             print("\nExtracting features...")
             features = feature_engineer.extract_features(news_data['Text'])
