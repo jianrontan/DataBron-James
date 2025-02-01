@@ -92,21 +92,21 @@ class TextPreprocessor:
         return entities
 
     def process_text(self, file_path):
-        """Complete text processing pipeline"""
         try:
-            # Load and clean text
             data = self.load_and_clean_text(file_path)
             if data is None:
                 return None
 
-            # Tokenize
-            data = self.tokenize_text(data)
+            print("Creating spaCy documents...")
+            data['doc'] = list(self.nlp.pipe(
+                data['Cleaned_words'], batch_size=32))
 
-            # Apply NER
-            data["NER_Entities"] = data["Tokenized"].apply(self.apply_ner)
+            data['Tokenized'] = data['doc'].apply(
+                lambda x: [token.text for token in x])
+            data['NER_Entities'] = data['doc'].apply(
+                lambda x: [(ent.text, ent.label_) for ent in x.ents])
 
             return data
-
         except Exception as e:
             print(f"Error in processing pipeline: {str(e)}")
             return None

@@ -1,6 +1,5 @@
 from rdflib import Graph, Namespace, Literal, URIRef
 from rdflib.namespace import RDF, RDFS, OWL
-import spacy
 from typing import Dict, List, Tuple
 import requests
 
@@ -19,7 +18,6 @@ class EntityLinker:
         self.kb = knowledge_base
         self.batch_size = batch_size
         self.query_cache = {}
-        self.nlp = spacy.load("en_core_web_sm")
 
     def _find_subject(self, token):
         """Find the subject connected to the token"""
@@ -143,11 +141,51 @@ class EntityLinker:
         confidence = max(0.1, min(1.0, base_score - distance_penalty))
         return confidence
 
+    def _extract_and_link_entities_from_preprocessed(self, text: str, tokenized: list, ner: list, article_url: str):
+        linked_entities = []
+        for entity_text, entity_type in ner:
+            candidates = self._query_wikidata(entity_text)
+            if candidates:
+                entity_data = self._process_entity_candidate(
+                    entity_text,
+                    entity_type,
+                    candidates[0]
+                )
+                linked_entities.append(entity_data)
+        return linked_entities
+
+    def _extract_relationships_from_tokenized(self, doc):
+        """Extract relationships using preprocessed dependencies"""
+        relationships = []
+
+        dep_map = {token: {'lefts': list(token.lefts), 'rights': list(token.rights)}
+                   for token in doc}
+
+        for sent in doc.sents:
+            for token in sent:
+                if token.dep_ == "ROOT":
+                    subject = next((child for child in dep_map[token]['lefts']
+                                    if child.dep_ in ["nsubj", "nsubjpass"]), None)
+                    obj = next((child for child in dep_map[token]['rights']
+                                if child.dep_ in ["dobj", "pobj"]), None)
+
+                    if subject and obj:
+                        confidence = self._calculate_relationship_confidence(
+                            subject, token, obj)
+                        rel_data = {
+                            'subject': subject.text,
+                            'predicate': token.text,
+                            'object': obj.text,
+                            'confidence': confidence
+                        }
+                        relationships.append(rel_data)
+
+        return relationships
+
     def process_batch(self, articles: List[Dict]):
         """Process articles in batches with proper progress tracking"""
         results = []
         total = len(articles)
-
         print(f"\nProcessing {
               total} articles for entities and relationships...")
 
@@ -155,21 +193,24 @@ class EntityLinker:
             batch = articles[i:i + self.batch_size]
             batch_results = []
 
-            # Progress bar
             progress = (i + 1) / total * 100
             bar_length = 30
             filled_length = int(bar_length * progress // 100)
             bar = '=' * filled_length + '-' * (bar_length - filled_length)
+
             print(f'\rProgress: [{bar}] {
                   progress:.1f}% - Processing batch {i+1}/{total}', end='')
 
             for article in batch:
-                doc = self.nlp(article['text'])
-                entities = self._extract_and_link_entities(
-                    doc=doc,
+                entities = self._extract_and_link_entities_from_preprocessed(
+                    text=article['text'],
+                    tokenized=article['tokenized'],
+                    ner=article['ner'],
                     article_url=article['url']
                 )
-                relationships = self._extract_relationships(doc)
+                relationships = self._extract_relationships_from_tokenized(
+                    article['doc']
+                )
                 batch_results.append({
                     'article_url': article['url'],
                     'entities': entities,

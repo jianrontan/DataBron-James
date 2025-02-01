@@ -68,14 +68,21 @@ def main():
         if news_data is not None:
             print("Processing entities and relationships...")
             articles = [
-                {'text': row['Text'], 'url': row['Link']}
+                {
+                    'text': row['Cleaned_words'],
+                    'tokenized': row['Tokenized'],
+                    'ner': row['NER_Entities'],
+                    'url': row['Link'],
+                    'doc': row['doc']
+                }
                 for _, row in news_data.iterrows()
             ]
 
             all_entities = entity_linker.process_batch(articles)
 
             print("\nExtracting features...")
-            features = feature_engineer.extract_features(news_data['Text'])
+            features = feature_engineer.extract_features(
+                news_data['Cleaned_words'])
 
             save_pipeline_results(news_data, all_entities,
                                   knowledge_base, features)
