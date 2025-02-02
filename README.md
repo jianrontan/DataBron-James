@@ -22,20 +22,21 @@ The project consists of several key components:
 - requests
 
 ## Installation
-# Create and activate virtual environment (recommended)
+### Create and activate virtual environment (recommended)
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install required packages
+### Install required packages
 pip install pandas spacy nltk numpy rdflib sumy requests openpyxl
 
-# Download required NLTK data
+### Download required NLTK data
 python -c "import nltk; nltk.download('stopwords'); nltk.download('punkt')"
 
-# Download spaCy model
+### Download spaCy model
 python -m spacy download en_core_web_sm
 
 ## Project Structure
+```plaintext
 project/
 ├── main.py                    # Main execution script
 ├── src/
@@ -49,6 +50,7 @@ project/
     ├── raw/                   # Raw input data
     ├── processed/             # Processed data outputs
     └── features/             # Extracted features
+```
 
 ## Pipeline Components
 
@@ -78,21 +80,38 @@ project/
 - Includes label encoding functionality
 - Handles model training and saving
 
-## Output Structure
+### Output Structure
+```plaintext
 data/processed/
 ├── preprocessed_news.csv      # Cleaned and preprocessed text
 ├── entity_analysis.csv        # Extracted entities
 └── knowledge_base/           # Knowledge base data
 data/features/
 └── news_features.csv         # Extracted features
+```
 
 ## Usage
 # Run the main pipeline
 python main.py
 
-## Technical Notes
+### Technical Notes
 - Uses spaCy for NLP tasks and entity recognition
 - Implements batch processing for efficient entity linking
 - Supports caching for Wikidata queries
 - Uses RDF graph structure for knowledge representation
 - Implements confidence scoring for entity matches and relationships
+
+### Data Split Configuration
+- Train/Test split: 80/20
+- Validation/Test split: 50/50
+- Small training set: 5% of full training data
+- Supports stratified splitting when class distribution allows
+
+### BERT Configuration
+- Base model: bert-base-uncased
+- Max sequence length: 128
+- Training parameters:
+  - Batch size: 4
+  - Epochs: 3
+  - Weight decay: 0.01
+
