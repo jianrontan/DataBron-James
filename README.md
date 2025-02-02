@@ -1,7 +1,7 @@
-# Natural Language Processing Pipeline
+# SMU BIA Datathon Natural Language Processing Pipeline
 
 ## Project Overview
-This is a Natural Language Processing (NLP) pipeline that processes news articles, extracts entities, builds a knowledge base, and performs feature engineering. The system is designed to analyze text data, identify named entities, and create structured representations of the information.
+This is a Natural Language Processing (NLP) pipeline that processes news articles, extracts entities, builds a knowledge base, performs feature engineering, and trains a model on the data. The system is designed to analyze text data, identify named entities, and create structured representations of the information.
 
 ## Technical Architecture
 The project consists of several key components:
@@ -10,6 +10,7 @@ The project consists of several key components:
 - Knowledge Base System
 - Entity Linking System
 - Data Processing Pipeline
+- Relationship Classification Module
 
 ## Dependencies
 - pandas
@@ -26,7 +27,7 @@ python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install required packages
-pip install pandas spacy nltk numpy rdflib sumy requests
+pip install pandas spacy nltk numpy rdflib sumy requests openpyxl
 
 # Download required NLTK data
 python -c "import nltk; nltk.download('stopwords'); nltk.download('punkt')"
@@ -42,7 +43,8 @@ project/
 │   ├── feature_engineering.py # Feature extraction module
 │   ├── knowledge_base.py      # Knowledge base management
 │   ├── entity_linker.py      # Entity linking system
-│   └── wikidata_client.py     # Wikidata API client
+│   ├── wikidata_client.py     # Wikidata API client
+|   └── relationship_classifier.py     # Model training module
 └── data/
     ├── raw/                   # Raw input data
     ├── processed/             # Processed data outputs
@@ -70,6 +72,11 @@ project/
 - Stores entity and relationship information
 - Maintains confidence scores
 - Supports graph-based data structure
+
+### Relationship Classifier
+- Uses BERT for sequence classification
+- Includes label encoding functionality
+- Handles model training and saving
 
 ## Output Structure
 data/processed/
