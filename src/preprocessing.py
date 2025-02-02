@@ -16,52 +16,45 @@ from sumy.summarizers.lsa import LsaSummarizer
 class TextPreprocessor:
     def __init__(self):
         """Initialize the TextPreprocessor with required NLTK and spaCy components"""
+        # Download required NLTK data
+        nltk.download('stopwords')
+        nltk.download('punkt')
+
+        # Initialize components
+        self.stop_words = set(stopwords.words('english'))
+        self.nlp = spacy.load("en_core_web_sm")
+
+        # NER configuration
+        # self.ner_config = {
+        #     "moves": None,
+        #     "update_with_oracle_cut_size": 100,
+        #     "model": DEFAULT_NER_MODEL,
+        #     "incorrect_spans_key": "incorrect_spans",
+        # }
+
+    def _summarize_text(self, text):
+        """Generate summary for individual text"""
         try:
-            nltk.download('stopwords')
-            nltk.download('punkt')
-            nltk.download('punkt_tab')
-            nltk.download('averaged_perceptron_tagger')
-
-            self.stop_words = set(stopwords.words('english'))
-            self.nlp = spacy.load("en_core_web_sm")
-            self.summarizer = LsaSummarizer()
-        except Exception as e:
-            print(f"Error initializing NLTK components: {str(e)}")
-            raise
-
-    def _summarize_text(self, text, sentences_count=1):
-        """Generate summary using LSA with fallback"""
-        try:
-            if not text or len(text.strip()) == 0:
-                return text
-
-            parser = PlaintextParser.from_string(
-                text,
-                Tokenizer("english")
-            )
-
-            self.summarizer.stop_words = self.stop_words
-
-            summary = self.summarizer(parser.document, sentences_count)
+            parser = PlaintextParser.from_string(text, Tokenizer("english"))
+            summarizer = LsaSummarizer()
+            summary = summarizer(parser.document, sentences_count=1)
             return " ".join([str(sentence) for sentence in summary])
         except Exception as e:
-            print(f"Error in summarization, returning original text: {str(e)}")
-            sentences = self.nlp(text).sents
-            return " ".join([str(sent) for sent in list(sentences)[:sentences_count]])
+            print(f"Error in summarization: {str(e)}")
+            return text
 
     def load_and_clean_text(self, file_path):
         """Load and clean text from Excel file"""
         try:
             df = pd.read_excel(file_path)
 
-            # Handle missing values
             if df['Text'].isnull().any():
                 df['Text'].fillna('', inplace=True)
 
-            # Create cleaned words column
+            df['Text'] = df['Text'].apply(lambda x: self._summarize_text(x))
+
             df['Cleaned_words'] = df['Text']
 
-            # Apply cleaning operations
             df['Cleaned_words'] = df['Cleaned_words'].apply(self._clean_text)
 
             return df
@@ -104,15 +97,13 @@ class TextPreprocessor:
             print(f"Error in tokenization: {str(e)}")
             return None
 
-    def apply_ner(self, tokens):
+    def apply_ner(self, text):
         """Apply Named Entity Recognition"""
-        sentence = " ".join(tokens)
-        doc = self.nlp(sentence)
+        doc = self.nlp(text)
         entities = [(ent.text, ent.label_) for ent in doc.ents]
         return entities
 
     def process_text(self, file_path):
-        """Process text with added summarization"""
         try:
             data = self.load_and_clean_text(file_path)
             if data is None:
@@ -121,31 +112,16 @@ class TextPreprocessor:
             print("Creating spaCy documents...")
             data['doc'] = list(self.nlp.pipe(
                 data['Cleaned_words'], batch_size=32))
+            
+            data['doc2'] = list(self.nlp.pipe(
+                data['Text'], batch_size=32))
 
             data['Tokenized'] = data['doc'].apply(
-                lambda x: [token.text for token in x]
-            )
+                lambda x: [token.text for token in x])
 
-            data['NER_Entities'] = data['doc'].apply(
-                lambda x: [(ent.text, ent.label_) for ent in x.ents]
-            )
-
-            print("Generating summaries...")
-            data['Summary'] = data['Text'].apply(self._summarize_text)
-
-            data['Summary_Tokenized'] = data['Summary'].apply(
-                lambda x: [token.text for token in self.nlp(x)]
-            )
-
-            data['Summary_Entities'] = data['Summary'].apply(
-                lambda x: [(ent.text, ent.label_) for ent in self.nlp(x).ents]
-            )
-
-            if 'Link' not in data.columns:
-                data['Link'] = ''
+            data['NER_Entities'] = data['doc2'].apply(self.apply_ner)
 
             return data
-
         except Exception as e:
             print(f"Error in processing pipeline: {str(e)}")
             return None

@@ -1,33 +1,15 @@
 import pandas as pd
 import os
-from src.preprocessing import TextPreprocessor
+from src import TextPreprocessor
 from src.feature_engineering import TextFeatureEngineer
 from src.knowledge_base import KnowledgeBase
 from src.entity_linker import EntityLinker
-# from src.relationship_classifier import RelationshipClassifier
-
+from src.relationship_classifier import RelationshipClassifier
 
 def create_output_directories():
     """Create output directories if they don't exist"""
     os.makedirs('data/processed', exist_ok=True)
     os.makedirs('data/features', exist_ok=True)
-
-
-def save_news_data(news_data):
-    try:
-        os.makedirs('data/processed/knowledge_base', exist_ok=True)
-        os.makedirs('data/features', exist_ok=True)
-
-        if news_data is not None:
-            preprocessed_file = 'data/processed/preprocessed_news.csv'
-            news_data.to_csv(preprocessed_file, index=False, encoding='utf-8')
-            print(f"Preprocessed data saved to {preprocessed_file}")
-
-    except Exception as e:
-        print(f"Error saving results: {str(e)}")
-        import traceback
-        traceback.print_exc()
-
 
 def save_pipeline_results(news_data, all_entities, knowledge_base, features, relationships):
     """Save all pipeline results to appropriate files"""
@@ -61,17 +43,15 @@ def save_pipeline_results(news_data, all_entities, knowledge_base, features, rel
             print(f"Features saved to {features_file}")
         
         # Save relationships
-        # if relationships is not None:
-        #     relationships_file = 'data/processed/relationships.csv'
-        #     pd.DataFrame(relationships).to_csv(
-        #         relationships_file, index=False, encoding='utf-8')
-        #     print(f"Relationships saved to {relationships_file}")
-
+        if relationships is not None:
+            relationships_file = 'data/processed/relationships.csv'
+            pd.DataFrame(relationships).to_csv(relationships_file, index=False, encoding='utf-8')
+            print(f"Relationships saved to {relationships_file}")
+    
     except Exception as e:
         print(f"Error saving results: {str(e)}")
         import traceback
         traceback.print_exc()
-
 
 def main():
     """Main execution function"""
@@ -82,42 +62,48 @@ def main():
         preprocessor = TextPreprocessor()
         feature_engineer = TextFeatureEngineer()
         knowledge_base = KnowledgeBase()
-        entity_linker = EntityLinker(knowledge_base, batch_size=20)
-        # classifier = RelationshipClassifier()
+        entity_linker = EntityLinker(knowledge_base)
+        classifier = RelationshipClassifier()
 
         # Process pipeline
         print("Starting preprocessing...")
-        news_data = preprocessor.process_text(
-            'data/raw/news_excerpts_parsed.xlsx')
-
-        save_news_data(news_data)
+        news_data = preprocessor.process_text('data/raw/news_excerpts_parsed.xlsx')
 
         if news_data is not None:
             print("Processing entities and relationships...")
-            articles = [
-                {
-                    'text': row['Cleaned_words'],
-                    'tokenized': row['Tokenized'],
-                    'ner': row['NER_Entities'],
-                    'url': row['Link'],
-                    'doc': row['doc']
-                }
-                for _, row in news_data.iterrows()
-            ]
+            all_entities = []
+            relationships = []
 
-            all_entities = entity_linker.process_batch(articles)
+            for _, row in news_data.iterrows():
+                # Process entities and relationships
+                article_analysis = entity_linker.link_entities(
+                    text=row['Text'],
+                    article_url=row['Link']
+                )
+                all_entities.append(article_analysis)
+                relationships.extend(article_analysis['relationships'])
+
+                # Add relationships to knowledge base
+                for rel in article_analysis['relationships']:
+                    knowledge_base.add_relationship(
+                        subject=rel['subject'],
+                        predicate=rel['predicate'],
+                        object=rel['object']
+                    )
 
             print("\nExtracting features...")
-            features = feature_engineer.extract_features(
-                news_data['Cleaned_words'])
+            features = feature_engineer.extract_features(news_data['Text'])
+            
+            # Train classifier
+            classifier.train('data/processed/relationships.csv')
 
-            save_pipeline_results(news_data, all_entities,
-                                  knowledge_base, features)
+            save_pipeline_results(news_data, all_entities, knowledge_base, features, relationships)
 
             return {
                 'entities': all_entities,
                 'knowledge_base': knowledge_base,
-                'features': features
+                'features': features,
+                'relationships': relationships
             }
 
     except Exception as e:
@@ -125,7 +111,6 @@ def main():
         import traceback
         traceback.print_exc()
         return None
-
 
 if __name__ == "__main__":
     results = main()
