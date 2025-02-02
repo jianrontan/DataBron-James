@@ -42,9 +42,9 @@ project/
 │   ├── preprocessing.py       # Text preprocessing module
 │   ├── feature_engineering.py # Feature extraction module
 │   ├── knowledge_base.py      # Knowledge base management
-│   ├── entity_linker.py      # Entity linking system
+│   ├── entity_linker.py       # Entity linking system
 │   ├── wikidata_client.py     # Wikidata API client
-|   └── relationship_classifier.py     # Model training module
+|   └── relationship_classifier.py     # Model training module (not yet integrated with pipeline)
 └── data/
     ├── raw/                   # Raw input data
     ├── processed/             # Processed data outputs
